@@ -2326,8 +2326,7 @@ function processFile(file) {
   const reader = new FileReader();
   reader.onload = function(e) {
     try {
-      const data = new Uint8Array(e.target.result);
-      const wb   = XLSX.read(data, {type:'uint8array', cellText:true, cellNF:false});
+      const wb = XLSX.read(e.target.result, {type:'binary', cellText:true, cellNF:false});
 
       // Extract all text from all sheets, flatten merged cells
       let allText = '';
@@ -2363,7 +2362,7 @@ function processFile(file) {
       alert('Could not read file: ' + err.message);
     }
   };
-  reader.readAsArrayBuffer(file);
+  reader.readAsBinaryString(file);  // binary string avoids CORS preflight uint8array issue
 }
 
 // ── EXTRACT + MATCH ───────────────────────────────────────────────────────
