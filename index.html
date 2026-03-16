@@ -1137,7 +1137,7 @@ body{font-family:'Segoe UI',Arial,sans-serif;background:var(--bg);color:var(--te
              placeholder="Search by name, code, or specialisation…"
              oninput="renderSupplierDir()"/>
       <button class="supdir-add-btn" onclick="openSupplierModal()">➕ Add Supplier</button>
-      <button class="supdir-add-btn" style="background:#1B3A6B" onclick="refreshFromSheets()">🔄 Sync</button>
+      <button class="supdir-add-btn" style="background:#1B3A6B" onclick="refreshSuppliersFromSheets()">🔄 Sync</button>
     </div>
     <div style="overflow-x:auto">
       <table class="sup-table">
@@ -1783,11 +1783,21 @@ function switchTab(tab) {
     document.getElementById('panel-'+t).style.display = t === tab ? 'block' : 'none';
   });
   if (tab === 'validity') renderValidityTab();
-  if (tab === 'suppliers') renderSupplierDir();
+  if (tab === 'suppliers') {
+    renderSupplierDir();
+    if (_gsUrl) refreshSuppliersFromSheets();  // auto-sync on tab open
+  }
   document.getElementById('chipsArea').style.display = tab === 'search' ? 'block' : 'none';
   document.getElementById('statusBar').style.display = 'none';
   document.getElementById('aiAnswer').style.display = 'none';
-  if (tab === 'my-quotes') renderMyQuotes();
+  if (tab === 'my-quotes') {
+    // If GS connected but cache is empty, load first then render
+    if (_gsUrl && (_gsQuotesCache === null || _gsQuotesCache.length === 0)) {
+      loadQuotesFromSheets().then(() => renderMyQuotes());
+    } else {
+      renderMyQuotes();
+    }
+  }
 }
 
 // ── SEARCH ────────────────────────────────────────────────────────────────
@@ -4235,6 +4245,44 @@ function initSupplierDropdown() {
 // Call on load
 initSupplierDropdown();
 
+
+// ── REFRESH SUPPLIERS FROM GOOGLE SHEETS ──────────────────────────────────
+async function refreshSuppliersFromSheets() {
+  if (!_gsUrl) { openGSSetup(); return; }
+  showSync('syncing', 'Loading suppliers from Sheets…');
+  try {
+    const data = await gsGet({ action: 'getSuppliers' });
+    if (Array.isArray(data) && data.length > 0) {
+      // Merge Sheets suppliers with base SUPPLIERS (Sheets takes priority)
+      const sheetsMap = {};
+      data.forEach(s => { if (s.short) sheetsMap[s.short.toUpperCase()] = s; });
+
+      // Start from base list and override with Sheets data
+      const base = SUPPLIERS.map(s => sheetsMap[s.short.toUpperCase()] || s);
+      // Add any new suppliers from Sheets not in base
+      data.forEach(s => {
+        if (s.short && !base.find(b => b.short.toUpperCase() === s.short.toUpperCase())) {
+          base.push(s);
+        }
+      });
+
+      // Save merged list
+      saveSuppliers(base);
+      rebuildSupplierRuntime(base);
+      rebuildSupplierDropdown();
+      renderSupplierDir();
+      showSync('ok', `✅ Suppliers synced — ${base.length} loaded`);
+    } else {
+      // No suppliers in Sheets yet — just re-render from local
+      renderSupplierDir();
+      showSync('ok', '✅ Using local supplier data');
+    }
+  } catch(err) {
+    showSync('error', '⚠️ Could not load suppliers from Sheets');
+    renderSupplierDir();
+  }
+}
+
 // ── API KEY MANAGEMENT ────────────────────────────────────────────────────
 const API_KEY_STORAGE = 'marine_api_key_v1';
 
@@ -4289,7 +4337,8 @@ function initGoogleSheets() {
   _gsUrl = localStorage.getItem(GS_URL_KEY) || '';
   updateGSHeaderBtn();
   if (_gsUrl) {
-    loadQuotesFromSheets();
+    // Load immediately on page init so cache is ready before user clicks Edit
+    loadQuotesFromSheets().catch(() => {});
   }
 }
 
@@ -4455,9 +4504,9 @@ async function loadQuotesFromSheets() {
     const uploaded = localOnly.length > 0 ? ` (+${localOnly.length} uploaded)` : '';
     showSync('ok', `✅ Synced — ${_gsQuotesCache.length} quotes${uploaded}`);
 
-    // Refresh UI
+    // Always refresh My Quotes so edit buttons have correct ids loaded
     updateNewItemsBadge();
-    if (activeTab === 'my-quotes') renderMyQuotes();
+    renderMyQuotes();
     if (activeTab === 'validity')  renderValidityTab();
 
   } catch(err) {
